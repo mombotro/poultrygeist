@@ -61,7 +61,7 @@ EVENTS = {
 
 
 class Chicken:
-    def __init__(self, breed, tier):
+    def __init__(self, breed, tier, purchase_price=None):
         stats = CHICKEN_STATS[breed]
         self.breed = breed
         self.tier = tier
@@ -71,6 +71,15 @@ class Chicken:
         self.base_health = stats["health"]
         self.current_health = self.base_health
         self.cash_value = stats["cash"]
+        # Track what was actually paid for this chicken
+        self.purchase_price = purchase_price if purchase_price is not None else stats["cash"]
+
+    def get_sale_price(self, season):
+        # Sell for 80% of purchase price, with potential seasonal bonus
+        base_sale_price = int(self.purchase_price * 0.8)
+        if season == "Fall":
+            base_sale_price = int(base_sale_price * (1 + SEASONS["Fall"]["market_increase"]))
+        return max(1, base_sale_price)  # Minimum 1 cash
 
     def __str__(self):
         return f'{self.tier} {self.breed} (Health: {self.current_health})'
@@ -89,7 +98,8 @@ class GameState:
         self.feed = INITIAL_FEED
         self.eggs = 0
         self.meat = 0
-        self.chickens = [Chicken(c["breed"], c["tier"]) for c in INITIAL_CHICKENS]
+        # Initial chickens get their base cash value as purchase price
+        self.chickens = [Chicken(c["breed"], c["tier"], CHICKEN_STATS[c["breed"]]["cash"]) for c in INITIAL_CHICKENS]
         self.graveyard = [] # Stores fallen Chicken objects
         self.ghost_chickens = [] # Stores GhostChicken objects
         self.turn = 1
@@ -103,9 +113,9 @@ class GameState:
     def get_coop_capacity(self):
         return COOP_UPGRADES[self.coop_level]["capacity"]
 
-    def add_chicken(self, breed, tier):
+    def add_chicken(self, breed, tier, purchase_price=None):
         if len(self.chickens) < self.get_coop_capacity():
-            self.chickens.append(Chicken(breed, tier))
+            self.chickens.append(Chicken(breed, tier, purchase_price))
             return True
         return False
 
@@ -232,7 +242,10 @@ def process_turn_start(game_state):
         if effect == 'lose_chicken':
             lose_chicken(game_state, messages)
         elif effect == 'gain_chicken':
-            game_state.add_chicken("Pearl Leghorn", "Bronze")
+            if game_state.add_chicken("Pearl Leghorn", "Bronze", CHICKEN_STATS["Pearl Leghorn"]["cash"]):
+                messages.append("A new Pearl Leghorn appeared!")
+            else:
+                messages.append("A new chicken appeared but your coop is full!")
         elif effect == 'cash_bonus':
             game_state.cash += 10
         elif effect == 'feed_bonus':
@@ -314,9 +327,9 @@ def play_game():
                     cost = max(1, cost)
 
                     if game_state.cash >= cost:
-                        if game_state.add_chicken(breed_to_buy, CHICKEN_STATS[breed_to_buy]["tier"]):
+                        if game_state.add_chicken(breed_to_buy, CHICKEN_STATS[breed_to_buy]["tier"], cost):
                             game_state.cash -= cost
-                            turn_messages.append(f"You bought a {breed_to_buy}.")
+                            turn_messages.append(f"You bought a {breed_to_buy} for ${cost}.")
                         else:
                             turn_messages.append("Your coop is full!")
                     else:
@@ -330,19 +343,15 @@ def play_game():
                 else:
                     print("\n--- Your Chickens ---")
                     for i, chicken in enumerate(game_state.chickens):
-                        sale_price = chicken.cash_value
-                        if game_state.season == "Fall":
-                            sale_price = int(sale_price * (1 + SEASONS["Fall"]["market_increase"]))
-                        print(f"{i+1}. {chicken} - ${sale_price}")
+                        sale_price = chicken.get_sale_price(game_state.season)
+                        print(f"{i+1}. {chicken} - ${sale_price} (bought for ${chicken.purchase_price})")
                     print("0. Go Back")
                     try:
                         choice = int(input("Choose a chicken to sell: "))
                         if choice == 0:
                             continue
                         sold_chicken = game_state.chickens.pop(choice - 1)
-                        sale_price = sold_chicken.cash_value
-                        if game_state.season == "Fall":
-                            sale_price = int(sale_price * (1 + SEASONS["Fall"]["market_increase"]))
+                        sale_price = sold_chicken.get_sale_price(game_state.season)
                         game_state.cash += sale_price
                         turn_messages.append(f"You sold a {sold_chicken} for ${sale_price}.")
                     except (ValueError, IndexError):
@@ -418,7 +427,8 @@ def play_game():
                     if confirm == 'y':
                         game_state.eggs -= HATCHING_COST
                         if random.random() < hatch_rate:
-                            if game_state.add_chicken("Pearl Leghorn", "Bronze"):
+                            # Hatched chickens get base cash value as purchase price
+                            if game_state.add_chicken("Pearl Leghorn", "Bronze", CHICKEN_STATS["Pearl Leghorn"]["cash"]):
                                 turn_messages.append("Success! A new Pearl Leghorn chick has hatched!")
                             else:
                                 turn_messages.append("The egg hatched, but your coop is full! The chick ran away.")
@@ -544,7 +554,8 @@ def play_game():
                                 if convert_choice != 0:
                                     chicken_to_convert = bronze_chickens[convert_choice - 1]
                                     game_state.chickens.remove(chicken_to_convert)
-                                    game_state.add_chicken("Duck", "Silver")
+                                    # Converted chickens get base cash value as purchase price
+                                    game_state.add_chicken("Duck", "Silver", CHICKEN_STATS["Duck"]["cash"])
                                     game_state.ghost_chickens.remove(selected_ghost)
                                     turn_messages.append(f"The Gold Ghost is consumed to transform your {chicken_to_convert.breed} into a Silver Duck!")
 
